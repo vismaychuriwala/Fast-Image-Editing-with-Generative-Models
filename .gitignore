@@ -1,5 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Project outputs
 outputs/*
 results/*
+
+# Dataset (keep structure but ignore large files)
 data/*
-FIXES.md
-IMPLEMENTATION_NOTES.md
+!data/.gitkeep
+
+# Logs
+*.log
+
+# Model cache
+.cache/
+models/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# OS
+.DS_Store
+Thumbs.db
+.directory
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~.nib
+
+# PyTest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Documentation (except README and QUICK_START)
+*.md
+!README.md
+!QUICK_START.md

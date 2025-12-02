@@ -52,9 +52,22 @@ def main():
     mapping = load_mapping_file(args.mapping_file)
     print(f"      Found {len(mapping)} entries in mapping file")
 
-    # Get list of generated images
+    # Check outputs directory exists and is accessible
     print(f"\n[2/3] Scanning outputs directory: {args.outputs_dir}")
-    output_files = set(os.listdir(args.outputs_dir))
+    if not os.path.exists(args.outputs_dir):
+        print(f"Error: Outputs directory not found: {args.outputs_dir}")
+        return
+
+    if not os.path.isdir(args.outputs_dir):
+        print(f"Error: Not a directory: {args.outputs_dir}")
+        return
+
+    try:
+        output_files = set(os.listdir(args.outputs_dir))
+    except PermissionError:
+        print(f"Error: Permission denied reading: {args.outputs_dir}")
+        return
+
     print(f"      Found {len(output_files)} files in outputs directory")
 
     # Initialize metrics calculator
@@ -96,6 +109,7 @@ def main():
 
             # Resize to same size if needed
             if source_img.size != edited_img.size:
+                print(f"  ⚠ Size mismatch for {image_id}: source={source_img.size}, edited={edited_img.size}. Resizing edited image.")
                 edited_img = edited_img.resize(source_img.size, Image.LANCZOS)
 
             # Get editing information

@@ -9,7 +9,8 @@ from diffusers import (
     StableDiffusionXLControlNetPipeline,
     ControlNetModel,
     LCMScheduler,
-    UNet2DConditionModel
+    UNet2DConditionModel,
+    AutoencoderKL,
 )
 
 
@@ -31,14 +32,16 @@ class FastEditor:
             "base_model": "stabilityai/stable-diffusion-xl-base-1.0",
             "controlnet": "diffusers/controlnet-canny-sdxl-1.0",
             "lcm_lora": "latent-consistency/lcm-lora-sdxl",
+            "vae_fix": "madebyollin/sdxl-vae-fp16-fix", # Fix for fp16 color artifacts
             "use_full_lcm": False,  # Use LoRA adapter
             "description": "Full SDXL (highest quality, ~6GB VRAM)"
         },
         "ssd-1b": {
             "base_model": "segmind/SSD-1B",
-            "controlnet": "diffusers/controlnet-canny-sdxl-1.0",  # Same ControlNet works
-            "lcm_model": "latent-consistency/lcm-ssd-1b",  # Full LCM model, not LoRA
-            "use_full_lcm": True,  # Use full LCM UNet
+            "controlnet": "diffusers/controlnet-canny-sdxl-1.0",
+            "lcm_model": "latent-consistency/lcm-ssd-1b",
+            "vae_fix": "madebyollin/sdxl-vae-fp16-fix", # <--- ADD THIS
+            "use_full_lcm": True,
             "description": "SSD-1B distilled (50% smaller, 60% faster, ~4GB VRAM)"
         }
     }
@@ -75,6 +78,15 @@ class FastEditor:
             self.config["controlnet"],
             torch_dtype=dtype
         )
+        # Load VAE fix if specified (Corrected logic to apply to BOTH paths)
+        vae = None
+        if "vae_fix" in self.config:
+            print(f"[FastEditor] Loading VAE fix: {self.config['vae_fix']}...")
+            vae = AutoencoderKL.from_pretrained(
+                self.config["vae_fix"],
+                torch_dtype=dtype,
+                force_upcast=True
+            )
 
         # 2. Load base model with appropriate LCM configuration
         if self.config["use_full_lcm"]:
@@ -91,25 +103,37 @@ class FastEditor:
                 self.config["base_model"],
                 unet=unet,
                 controlnet=self.controlnet,
+                vae=vae,  # <--- PASS VAE HERE
                 torch_dtype=dtype,
                 variant="fp16"
             ).to(device)
+            
+            print("[FastEditor] Setting LCM scheduler (Manual Config)...")
+            self.pipe.scheduler = LCMScheduler.from_config(
+                self.pipe.scheduler.config,
+                timestep_spacing="trailing"  # <--- CRITICAL for SSD-1B LCM
+            )
         else:
-            # For SDXL: Load base model then apply LoRA
+            # === SDXL PATH ===
+            # We must load the base model here because the code above was skipped
             print(f"[FastEditor] Loading {model_name.upper()} base model...")
             self.pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
                 self.config["base_model"],
                 controlnet=self.controlnet,
+                vae=vae,  # Pass the global VAE here
                 torch_dtype=dtype,
             ).to(device)
 
-            # 3. Load LCM-LoRA for fast generation (SDXL only)
+            # 3. Load LCM-LoRA
             print("[FastEditor] Loading LCM-LoRA weights...")
             self.pipe.load_lora_weights(self.config["lcm_lora"])
 
-        # 4. Set LCM scheduler
-        print("[FastEditor] Setting LCM scheduler...")
-        self.pipe.scheduler = LCMScheduler.from_config(self.pipe.scheduler.config)
+            # 4. Set LCM scheduler (Trailing spacing)
+            print("[FastEditor] Setting LCM scheduler...")
+            self.pipe.scheduler = LCMScheduler.from_config(
+                self.pipe.scheduler.config,
+                timestep_spacing="trailing"
+            )
 
         # 5. Enable memory optimizations
         print("[FastEditor] Enabling memory optimizations...")

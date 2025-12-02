@@ -1,10 +1,10 @@
-# Fast Image Editing with SDXL/SSD-1B + LCM-LoRA + ControlNet
+# Fast Image Editing with SDXL/SSD-1B + LCM + ControlNet
 
 Fast image editing pipeline combining:
 - **SDXL or SSD-1B** for high-quality generation
   - SDXL: Full quality (~6GB VRAM)
   - SSD-1B: 50% smaller, 60% faster (~4GB VRAM)
-- **LCM-LoRA** for 4-step fast inference (10-15x speedup)
+- **LCM (Latent Consistency Models)** for 4-step fast inference (10-15x speedup)
 - **ControlNet (Canny)** for structure preservation
 
 ## Project Structure
@@ -30,9 +30,16 @@ project/
 ```bash
 # Install dependencies
 pip install -r requirements.txt
+
+# Verify installation
+python test_setup.py
 ```
 
-**Note**: Requires CUDA-enabled GPU with at least 6GB VRAM.
+**GPU Requirements:**
+- **SDXL model:** 6GB+ VRAM recommended
+- **SSD-1B model:** 4GB+ VRAM recommended (50% smaller, 60% faster)
+- CPU offloading enabled by default to reduce VRAM usage
+- CUDA-enabled GPU required
 
 ## Usage
 
@@ -74,9 +81,62 @@ python run_single_image.py \
     --compute_metrics
 ```
 
-### 2. Batch Evaluation
+### 2. Batch Processing
 
-Evaluate edited images against PIE-Bench ground truth:
+Process multiple images from PIE-Bench dataset:
+
+```bash
+python run_batch.py \
+    --num_images 50 \
+    --model sdxl \
+    --steps 4 \
+    --guidance 1.5 \
+    --control_scale 0.5 \
+    --skip_existing
+```
+
+**Arguments:**
+- `--mapping_file`: PIE-Bench mapping file (default: `data/PIE-Bench_v1/mapping_file.json`)
+- `--source_dir`: Source images directory (default: `data/PIE-Bench_v1/annotation_images`)
+- `--output_dir`: Output directory (default: `outputs`)
+- `--model`: Model to use - `sdxl` (default) or `ssd-1b`
+- `--num_images`: Number of images to process (default: all)
+- `--editing_types`: Filter by editing type IDs (e.g., `--editing_types 0 1 2`)
+- `--image_ids`: Process specific image IDs (e.g., `--image_ids img001 img002`)
+- `--steps`: Number of inference steps (default: 4)
+- `--guidance`: Guidance scale (default: 1.5)
+- `--control_scale`: ControlNet conditioning scale (default: 0.5)
+- `--seed`: Random seed for reproducibility
+- `--skip_existing`: Skip images that already have outputs (useful for resuming)
+- `--no_cpu_offload`: Disable CPU offloading (faster but needs more VRAM)
+
+**Filter Examples:**
+
+Process first 100 images:
+```bash
+python run_batch.py --num_images 100
+```
+
+Process specific editing types:
+```bash
+python run_batch.py --editing_types 0 1 2 --num_images 50
+```
+
+Process specific images:
+```bash
+python run_batch.py --image_ids img001 img002 img003
+```
+
+Resume interrupted batch:
+```bash
+python run_batch.py --num_images 1000 --skip_existing
+```
+
+**Note:** Batch processing is intentionally sequential to avoid GPU memory issues on 6GB VRAM systems. Processing is roughly 5-10 seconds per image on RTX 3060.
+
+### 3. Batch Evaluation
+
+Evaluate edited images and compute metrics:
 
 ```bash
 python evaluate.py \

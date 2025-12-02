@@ -21,6 +21,25 @@ def load_mapping_file(mapping_path):
     return mapping
 
 
+def safe_join(base_dir, user_path):
+    """Safely join paths, preventing directory traversal."""
+    # Normalize the user path
+    user_path = os.path.normpath(user_path)
+
+    # Ensure no absolute paths or parent directory references
+    if os.path.isabs(user_path) or user_path.startswith('..'):
+        raise ValueError(f"Invalid path: {user_path}")
+
+    # Join and verify result is within base directory
+    full_path = os.path.abspath(os.path.join(base_dir, user_path))
+    base_abs = os.path.abspath(base_dir)
+
+    if not full_path.startswith(base_abs):
+        raise ValueError(f"Path traversal detected: {user_path}")
+
+    return full_path
+
+
 def main():
     parser = argparse.ArgumentParser(description="Batch image editing on PIE-Bench")
     parser.add_argument("--mapping_file", type=str,
@@ -114,10 +133,10 @@ def main():
 
     for image_id, entry in tqdm(selected_entries, desc="Editing"):
         try:
-            # Get paths
+            # Get paths (with path traversal protection)
             source_filename = entry["image_path"]
-            source_path = os.path.join(args.source_dir, source_filename)
-            output_path = os.path.join(args.output_dir, source_filename)
+            source_path = safe_join(args.source_dir, source_filename)
+            output_path = safe_join(args.output_dir, source_filename)
 
             # Skip if output exists and skip_existing is set
             if args.skip_existing and os.path.exists(output_path):
@@ -162,8 +181,16 @@ def main():
             if processed % 10 == 0:
                 editor.clear_memory()
 
+        except FileNotFoundError as e:
+            print(f"\n      File not found for {image_id}: {e}")
+            failed += 1
+            continue
+        except ValueError as e:
+            print(f"\n      Invalid path for {image_id}: {e}")
+            failed += 1
+            continue
         except Exception as e:
-            print(f"\n      Error processing {image_id}: {e}")
+            print(f"\n      Error processing {image_id} ({type(e).__name__}): {e}")
             failed += 1
             continue
 
@@ -177,6 +204,12 @@ def main():
     if processed > 0:
         print(f"\nAverage time per image: {total_time / processed:.2f}s")
         print(f"Total time: {total_time:.2f}s ({total_time / 60:.1f} minutes)")
+    else:
+        print(f"\n⚠ WARNING: No images were successfully processed!")
+        print(f"  Check that:")
+        print(f"    - Source images exist at: {args.source_dir}")
+        print(f"    - Mapping file is correct: {args.mapping_file}")
+        print(f"    - Selected filters match available images")
     print(f"\nOutputs saved to: {args.output_dir}")
     print(f"{'='*60}")
 
