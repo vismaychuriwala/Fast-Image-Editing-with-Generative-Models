@@ -31,10 +31,23 @@ def main():
     parser.add_argument("--output_dir", type=str, default="outputs", help="Output directory")
     parser.add_argument("--no_cpu_offload", action="store_true",
                         help="Disable CPU offloading (faster but needs more VRAM)")
+    parser.add_argument("--quality_mode", action="store_true",
+                        help="Maximum quality mode (fp32, full ControlNet) - A100 recommended")
+    parser.add_argument("--full_precision", action="store_true",
+                        help="Use fp32 instead of fp16 (better quality, 2x VRAM)")
+    parser.add_argument("--full_controlnet", action="store_true",
+                        help="Use full-size ControlNet instead of small variant")
     parser.add_argument("--compute_metrics", action="store_true", help="Compute metrics")
     parser.add_argument("--show_plot", action="store_true", help="Show comparison plot")
 
     args = parser.parse_args()
+
+    # Handle quality mode
+    if args.quality_mode:
+        args.full_precision = True
+        args.full_controlnet = True
+        args.no_cpu_offload = True
+        print("[Quality Mode] Enabled: fp32 + full ControlNet + no CPU offload")
 
     # Check if image exists
     if not os.path.exists(args.image):
@@ -54,8 +67,13 @@ def main():
 
     # Initialize pipeline
     print(f"\n[2/4] Initializing FastEditor...")
-    editor = FastEditor(model_name=args.model, device="cuda",
-                       enable_cpu_offload=not args.no_cpu_offload)
+    editor = FastEditor(
+        model_name=args.model,
+        device="cuda",
+        enable_cpu_offload=not args.no_cpu_offload,
+        use_full_precision=args.full_precision,
+        use_full_controlnet=args.full_controlnet
+    )
 
     # Display memory usage
     mem = editor.get_memory_usage()

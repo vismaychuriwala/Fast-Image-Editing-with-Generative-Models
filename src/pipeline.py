@@ -43,7 +43,7 @@ class FastEditor:
     }
 
     def __init__(self, model_name="sdxl", device="cuda", dtype=torch.float16,
-                 enable_cpu_offload=True):
+                 enable_cpu_offload=True, use_full_precision=False, use_full_controlnet=False):
         """
         Initialize the FastEditor pipeline.
 
@@ -53,33 +53,56 @@ class FastEditor:
             dtype: Data type for models (torch.float16 or torch.float32)
             enable_cpu_offload: Enable CPU offloading (default: True)
                                Disable for faster inference if you have 8GB+ VRAM
+            use_full_precision: Use float32 for maximum quality (A100 recommended)
+                               Overrides dtype parameter when True
+            use_full_controlnet: Use full-size ControlNet instead of small variant
+                                (Higher quality, needs ~2GB more VRAM)
         """
         if model_name not in self.MODEL_CONFIGS:
             raise ValueError(f"Unknown model: {model_name}. Choose from {list(self.MODEL_CONFIGS.keys())}")
 
         self.model_name = model_name
         self.device = device
-        self.dtype = dtype
+        # Override dtype if full precision requested
+        if use_full_precision:
+            self.dtype = torch.float32
+            print(f"[FastEditor] Full precision mode enabled (fp32)")
+        else:
+            self.dtype = dtype
         self.enable_cpu_offload = enable_cpu_offload
+        self.use_full_controlnet = use_full_controlnet
         self.config = self.MODEL_CONFIGS[model_name]
 
         print(f"[FastEditor] Initializing with {model_name.upper()}")
         print(f"[FastEditor] {self.config['description']}")
-        print(f"[FastEditor] Device: {device}, Dtype: {dtype}")
+        print(f"[FastEditor] Device: {device}, Dtype: {self.dtype}")
         print(f"[FastEditor] CPU offload: {'enabled' if enable_cpu_offload else 'disabled'}")
 
         # 1. Load ControlNet (Canny) for structure preservation
-        print("[FastEditor] Loading ControlNet (Canny)...")
+        if use_full_controlnet:
+            print("[FastEditor] Loading ControlNet (Canny) - FULL SIZE for maximum quality...")
+            controlnet_model = "diffusers/controlnet-canny-sdxl-1.0"
+        else:
+            print("[FastEditor] Loading ControlNet (Canny) - small variant...")
+            controlnet_model = "diffusers/controlnet-canny-sdxl-1.0-small"
+
         self.controlnet = ControlNetModel.from_pretrained(
-            "diffusers/controlnet-canny-sdxl-1.0-small", # VRAM Saver
-            torch_dtype=dtype
+            controlnet_model,
+            torch_dtype=self.dtype
         )
-        # Load VAE fix if specified (Corrected logic to apply to BOTH paths)
-        vae = AutoencoderKL.from_pretrained(
-            "madebyollin/sdxl-vae-fp16-fix",
-            torch_dtype=dtype,
-            force_upcast=True
-        )
+        # Load VAE - use fp16 fix for fp16, original for fp32
+        if self.dtype == torch.float32:
+            print("[FastEditor] Loading VAE (fp32 for maximum quality)...")
+            vae = AutoencoderKL.from_pretrained(
+                "stabilityai/sdxl-vae",
+                torch_dtype=self.dtype
+            )
+        else:
+            print("[FastEditor] Loading VAE (fp16-fix)...")
+            vae = AutoencoderKL.from_pretrained(
+                "madebyollin/sdxl-vae-fp16-fix",
+                torch_dtype=self.dtype
+            )
 
         # 2. Load base model with appropriate LCM configuration
         if self.config["use_full_lcm"]:
@@ -137,9 +160,11 @@ class FastEditor:
         else:
             print("[FastEditor]   - CPU offload disabled (faster, needs more VRAM)")
 
+        # Note: VAE tiling/slicing can cause color artifacts with fp16
+        # Only enable if you need to save VRAM and can tolerate slight quality loss
         # self.pipe.enable_vae_slicing()        # Process VAE in slices
-        self.pipe.enable_vae_tiling()           # Process VAE in tiles
-        self.pipe.enable_attention_slicing()  # Reduce attention memory
+        # self.pipe.enable_vae_tiling()         # Process VAE in tiles (can cause color banding)
+        self.pipe.enable_attention_slicing()    # Reduce attention memory (safe)
 
         print("[FastEditor] Initialization complete!")
 

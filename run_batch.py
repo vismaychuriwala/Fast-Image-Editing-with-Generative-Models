@@ -75,6 +75,12 @@ def main():
                         help="Negative prompt")
     parser.add_argument("--no_cpu_offload", action="store_true",
                         help="Disable CPU offloading (faster but needs more VRAM)")
+    parser.add_argument("--quality_mode", action="store_true",
+                        help="Maximum quality mode (fp32, full ControlNet) - A100 recommended")
+    parser.add_argument("--full_precision", action="store_true",
+                        help="Use fp32 instead of fp16 (better quality, 2x VRAM)")
+    parser.add_argument("--full_controlnet", action="store_true",
+                        help="Use full-size ControlNet instead of small variant")
     parser.add_argument("--skip_existing", action="store_true",
                         help="Skip images that already have outputs")
     parser.add_argument("--save_comparisons", action="store_true",
@@ -82,9 +88,20 @@ def main():
 
     args = parser.parse_args()
 
+    # Handle quality mode
+    if args.quality_mode:
+        args.full_precision = True
+        args.full_controlnet = True
+        args.no_cpu_offload = True
+        print("[Quality Mode] Enabled: fp32 + full ControlNet + no CPU offload")
+
+    # Create output directory name based on model and precision
+    precision_str = "fp32" if args.full_precision else "fp16"
+    model_suffix = f"{args.model}_{precision_str}"
+
     # Create output directories with organized structure
-    edited_dir = os.path.join(args.output_dir, "batch", "edited")
-    comparisons_dir = os.path.join(args.output_dir, "batch", "comparisons")
+    edited_dir = os.path.join(args.output_dir, "batch", "edited", model_suffix)
+    comparisons_dir = os.path.join(args.output_dir, "batch", "comparisons", model_suffix)
     os.makedirs(edited_dir, exist_ok=True)
     if args.save_comparisons:
         os.makedirs(comparisons_dir, exist_ok=True)
@@ -127,9 +144,14 @@ def main():
         return
 
     # Initialize pipeline
-    print(f"\n[3/3] Initializing FastEditor...")
-    editor = FastEditor(model_name=args.model, device="cuda",
-                       enable_cpu_offload=not args.no_cpu_offload)
+    print(f"\n[3/3] Initializing FastEditor ({model_suffix})...")
+    editor = FastEditor(
+        model_name=args.model,
+        device="cuda",
+        enable_cpu_offload=not args.no_cpu_offload,
+        use_full_precision=args.full_precision,
+        use_full_controlnet=args.full_controlnet
+    )
 
     # Disable per-image diffusion progress bars so only the overall batch bar is shown
     if hasattr(editor, "pipe"):
