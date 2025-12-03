@@ -8,7 +8,6 @@ import argparse
 import os
 import json
 import csv
-from pathlib import Path
 from PIL import Image
 from tqdm import tqdm
 import numpy as np

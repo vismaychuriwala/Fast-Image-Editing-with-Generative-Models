@@ -30,16 +30,13 @@ class FastEditor:
     MODEL_CONFIGS = {
         "sdxl": {
             "base_model": "stabilityai/stable-diffusion-xl-base-1.0",
-
             "lcm_lora": "latent-consistency/lcm-lora-sdxl",
-            "vae_fix": "madebyollin/sdxl-vae-fp16-fix", # Fix for fp16 color artifacts
             "use_full_lcm": False,  # Use LoRA adapter
             "description": "Full SDXL (highest quality, ~6GB VRAM)"
         },
         "ssd-1b": {
             "base_model": "segmind/SSD-1B",
             "lcm_model": "latent-consistency/lcm-ssd-1b",
-            "vae_fix": "madebyollin/sdxl-vae-fp16-fix", # <--- ADD THIS
             "use_full_lcm": True,
             "description": "SSD-1B distilled (50% smaller, 60% faster, ~4GB VRAM)"
         }
@@ -75,7 +72,7 @@ class FastEditor:
         print("[FastEditor] Loading ControlNet (Canny)...")
         self.controlnet = ControlNetModel.from_pretrained(
             "diffusers/controlnet-canny-sdxl-1.0-small", # VRAM Saver
-            torch_dtype=torch.float16
+            torch_dtype=dtype
         )
         # Load VAE fix if specified (Corrected logic to apply to BOTH paths)
         vae = AutoencoderKL.from_pretrained(
@@ -118,6 +115,7 @@ class FastEditor:
                 controlnet=self.controlnet,
                 vae=vae,  # Pass the global VAE here
                 torch_dtype=dtype,
+                variant="fp16"
             ).to(device)
 
             # 3. Load LCM-LoRA
@@ -180,7 +178,7 @@ class FastEditor:
         prompt,
         negative_prompt="",
         num_inference_steps=4,
-        guidance_scale=1.2,
+        guidance_scale=1.5,
         controlnet_conditioning_scale=0.5,
         canny_low_threshold=100,
         canny_high_threshold=200,
@@ -209,7 +207,8 @@ class FastEditor:
         else:
             generator = None
 
-        # Resize to 512x512 (PIE-Bench resolution)
+        # Resize to 1024x1024 (SDXL native resolution)
+        # Note: Metrics will be computed at 512x512 (PIE-Bench resolution) downstream
         image = image.resize((1024, 1024), Image.LANCZOS)
 
         # Generate Canny edge map
