@@ -108,21 +108,38 @@ class FastEditor:
         if self.config["use_full_lcm"]:
             # For SSD-1B: Load full LCM UNet model
             print(f"[FastEditor] Loading LCM UNet for {model_name.upper()}...")
-            unet = UNet2DConditionModel.from_pretrained(
-                self.config["lcm_model"],
-                torch_dtype=dtype,
-                variant="fp16"
-            )
+            # Use variant only for fp16, omit for fp32
+            if self.dtype == torch.float16:
+                unet = UNet2DConditionModel.from_pretrained(
+                    self.config["lcm_model"],
+                    torch_dtype=self.dtype,
+                    variant="fp16"
+                )
+            else:
+                unet = UNet2DConditionModel.from_pretrained(
+                    self.config["lcm_model"],
+                    torch_dtype=self.dtype
+                )
 
             print(f"[FastEditor] Loading {model_name.upper()} base model with LCM UNet...")
-            self.pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
-                self.config["base_model"],
-                unet=unet,
-                controlnet=self.controlnet,
-                vae=vae,  # <--- PASS VAE HERE
-                torch_dtype=dtype,
-                variant="fp16"
-            ).to(device)
+            # Use variant only for fp16, omit for fp32
+            if self.dtype == torch.float16:
+                self.pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
+                    self.config["base_model"],
+                    unet=unet,
+                    controlnet=self.controlnet,
+                    vae=vae,
+                    torch_dtype=self.dtype,
+                    variant="fp16"
+                ).to(device)
+            else:
+                self.pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
+                    self.config["base_model"],
+                    unet=unet,
+                    controlnet=self.controlnet,
+                    vae=vae,
+                    torch_dtype=self.dtype
+                ).to(device)
             
             print("[FastEditor] Setting LCM scheduler (Manual Config)...")
             self.pipe.scheduler = LCMScheduler.from_config(
