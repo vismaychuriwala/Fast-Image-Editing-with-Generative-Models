@@ -131,6 +131,10 @@ def main():
     editor = FastEditor(model_name=args.model, device="cuda",
                        enable_cpu_offload=not args.no_cpu_offload)
 
+    # Disable per-image diffusion progress bars so only the overall batch bar is shown
+    if hasattr(editor, "pipe"):
+        editor.pipe.set_progress_bar_config(disable=True)
+
     # Display memory usage
     mem = editor.get_memory_usage()
     print(f"      GPU Memory: {mem['allocated_gb']:.2f}GB allocated, {mem['reserved_gb']:.2f}GB reserved")
