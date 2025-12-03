@@ -32,7 +32,7 @@ def main():
                         default="data/PIE-Bench_v1/annotation_images",
                         help="Directory containing source images")
     parser.add_argument("--outputs_dir", type=str, required=True,
-                        help="Directory containing edited images")
+                        help="Directory containing edited images (e.g., outputs/batch/edited or outputs/single/edited)")
     parser.add_argument("--results_file", type=str,
                         default="results/metrics.csv",
                         help="Output CSV file for metrics")
@@ -107,10 +107,10 @@ def main():
             source_img = Image.open(source_path).convert("RGB")
             edited_img = Image.open(output_path).convert("RGB")
 
-            # Resize to same size if needed
-            if source_img.size != edited_img.size:
-                print(f"  ⚠ Size mismatch for {image_id}: source={source_img.size}, edited={edited_img.size}. Resizing edited image.")
-                edited_img = edited_img.resize(source_img.size, Image.LANCZOS)
+            # Resize copies to 512x512 for metrics while preserving originals for reporting/saving
+            metric_size = (512, 512)
+            source_metric = source_img if source_img.size == metric_size else source_img.resize(metric_size, Image.LANCZOS)
+            edited_metric = edited_img if edited_img.size == metric_size else edited_img.resize(metric_size, Image.LANCZOS)
 
             # Get editing information
             editing_prompt = entry.get("editing_prompt", "")
@@ -118,8 +118,8 @@ def main():
 
             # Calculate metrics
             metrics = metrics_calc.calculate_all_metrics(
-                source_img=source_img,
-                edited_img=edited_img,
+                source_img=source_metric,
+                edited_img=edited_metric,
                 prompt=editing_prompt
             )
 
@@ -132,6 +132,9 @@ def main():
                 "ssim": metrics["ssim"],
                 "lpips": metrics["lpips"],
                 "clip_score": metrics["clip_score"],
+                "psnr": metrics["psnr"],
+                "mse": metrics["mse"],
+                "dino_distance": metrics["dino_distance"],
             }
             all_results.append(result)
 
@@ -141,11 +144,17 @@ def main():
                     "ssim": [],
                     "lpips": [],
                     "clip_score": [],
+                    "psnr": [],
+                    "mse": [],
+                    "dino_distance": [],
                     "count": 0
                 }
             category_metrics[editing_type]["ssim"].append(metrics["ssim"])
             category_metrics[editing_type]["lpips"].append(metrics["lpips"])
             category_metrics[editing_type]["clip_score"].append(metrics["clip_score"])
+            category_metrics[editing_type]["psnr"].append(metrics["psnr"])
+            category_metrics[editing_type]["mse"].append(metrics["mse"])
+            category_metrics[editing_type]["dino_distance"].append(metrics["dino_distance"])
             category_metrics[editing_type]["count"] += 1
 
             processed_count += 1
@@ -166,7 +175,7 @@ def main():
     print(f"\n[4/4] Saving results...")
     with open(args.results_file, "w", newline="") as f:
         fieldnames = ["image_id", "image_path", "editing_type_id", "editing_prompt",
-                      "ssim", "lpips", "clip_score"]
+                      "ssim", "lpips", "clip_score", "psnr", "mse", "dino_distance"]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(all_results)
@@ -191,6 +200,21 @@ def main():
                 "std": float(np.std([r["clip_score"] for r in all_results])),
                 "median": float(np.median([r["clip_score"] for r in all_results])),
             },
+            "psnr": {
+                "mean": float(np.mean([r["psnr"] for r in all_results])),
+                "std": float(np.std([r["psnr"] for r in all_results])),
+                "median": float(np.median([r["psnr"] for r in all_results])),
+            },
+            "mse": {
+                "mean": float(np.mean([r["mse"] for r in all_results])),
+                "std": float(np.std([r["mse"] for r in all_results])),
+                "median": float(np.median([r["mse"] for r in all_results])),
+            },
+            "dino_distance": {
+                "mean": float(np.mean([r["dino_distance"] for r in all_results])),
+                "std": float(np.std([r["dino_distance"] for r in all_results])),
+                "median": float(np.median([r["dino_distance"] for r in all_results])),
+            },
         },
         "by_category": {}
     }
@@ -211,6 +235,18 @@ def main():
                 "mean": float(np.mean(metrics["clip_score"])),
                 "std": float(np.std(metrics["clip_score"])),
             },
+            "psnr": {
+                "mean": float(np.mean(metrics["psnr"])),
+                "std": float(np.std(metrics["psnr"])),
+            },
+            "mse": {
+                "mean": float(np.mean(metrics["mse"])),
+                "std": float(np.std(metrics["mse"])),
+            },
+            "dino_distance": {
+                "mean": float(np.mean(metrics["dino_distance"])),
+                "std": float(np.std(metrics["dino_distance"])),
+            },
         }
 
     # Save summary
@@ -226,7 +262,10 @@ def main():
     print(f"\nOverall Metrics:")
     print(f"  SSIM:       {summary['overall']['ssim']['mean']:.4f} ± {summary['overall']['ssim']['std']:.4f}")
     print(f"  LPIPS:      {summary['overall']['lpips']['mean']:.4f} ± {summary['overall']['lpips']['std']:.4f}")
+    print(f"  PSNR:       {summary['overall']['psnr']['mean']:.2f} ± {summary['overall']['psnr']['std']:.2f} dB")
+    print(f"  MSE:        {summary['overall']['mse']['mean']:.6f} ± {summary['overall']['mse']['std']:.6f}")
     print(f"  CLIP Score: {summary['overall']['clip_score']['mean']:.2f} ± {summary['overall']['clip_score']['std']:.2f}")
+    print(f"  DINO Dist.: {summary['overall']['dino_distance']['mean']:.4f} ± {summary['overall']['dino_distance']['std']:.4f}")
 
     print(f"\nMetrics by Category:")
     for category in sorted(summary["by_category"].keys()):
@@ -234,7 +273,10 @@ def main():
         print(f"\n  Category {category} ({cat_data['count']} images):")
         print(f"    SSIM:       {cat_data['ssim']['mean']:.4f} ± {cat_data['ssim']['std']:.4f}")
         print(f"    LPIPS:      {cat_data['lpips']['mean']:.4f} ± {cat_data['lpips']['std']:.4f}")
+        print(f"    PSNR:       {cat_data['psnr']['mean']:.2f} ± {cat_data['psnr']['std']:.2f} dB")
+        print(f"    MSE:        {cat_data['mse']['mean']:.6f} ± {cat_data['mse']['std']:.6f}")
         print(f"    CLIP Score: {cat_data['clip_score']['mean']:.2f} ± {cat_data['clip_score']['std']:.2f}")
+        print(f"    DINO Dist.: {cat_data['dino_distance']['mean']:.4f} ± {cat_data['dino_distance']['std']:.4f}")
 
     print(f"\n{'='*60}")
     print("\nDone!")

@@ -10,6 +10,7 @@ import json
 import time
 from PIL import Image
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 from src.pipeline import FastEditor
 
@@ -64,17 +65,29 @@ def main():
                         help="Guidance scale")
     parser.add_argument("--control_scale", type=float, default=0.5,
                         help="ControlNet conditioning scale")
+    parser.add_argument("--canny_low", type=int, default=100,
+                        help="Canny low threshold")
+    parser.add_argument("--canny_high", type=int, default=200,
+                        help="Canny high threshold")
     parser.add_argument("--seed", type=int, default=None,
                         help="Random seed")
+    parser.add_argument("--negative_prompt", type=str, default="",
+                        help="Negative prompt")
     parser.add_argument("--no_cpu_offload", action="store_true",
                         help="Disable CPU offloading (faster but needs more VRAM)")
     parser.add_argument("--skip_existing", action="store_true",
                         help="Skip images that already have outputs")
+    parser.add_argument("--save_comparisons", action="store_true",
+                        help="Save side-by-side comparison images")
 
     args = parser.parse_args()
 
-    # Create output directory
-    os.makedirs(args.output_dir, exist_ok=True)
+    # Create output directories with organized structure
+    edited_dir = os.path.join(args.output_dir, "batch", "edited")
+    comparisons_dir = os.path.join(args.output_dir, "batch", "comparisons")
+    os.makedirs(edited_dir, exist_ok=True)
+    if args.save_comparisons:
+        os.makedirs(comparisons_dir, exist_ok=True)
 
     # Load mapping file
     print(f"\n[1/3] Loading mapping file from {args.mapping_file}")
@@ -125,6 +138,9 @@ def main():
     # Process images
     print(f"\n      Processing {len(selected_entries)} images...")
     print(f"      Parameters: steps={args.steps}, guidance={args.guidance}, control_scale={args.control_scale}")
+    if args.negative_prompt:
+        print(f"      Negative prompt: {args.negative_prompt}")
+    print(f"      Canny thresholds: low={args.canny_low}, high={args.canny_high}")
 
     processed = 0
     skipped = 0
@@ -136,7 +152,9 @@ def main():
             # Get paths (with path traversal protection)
             source_filename = entry["image_path"]
             source_path = safe_join(args.source_dir, source_filename)
-            output_path = safe_join(args.output_dir, source_filename)
+
+            # Save to batch/edited folder
+            output_path = os.path.join(edited_dir, source_filename)
 
             # Skip if output exists and skip_existing is set
             if args.skip_existing and os.path.exists(output_path):
@@ -165,9 +183,12 @@ def main():
             edited_img = editor.edit(
                 image=source_img,
                 prompt=editing_prompt,
+                negative_prompt=args.negative_prompt,
                 num_inference_steps=args.steps,
                 guidance_scale=args.guidance,
                 controlnet_conditioning_scale=args.control_scale,
+                canny_low_threshold=args.canny_low,
+                canny_high_threshold=args.canny_high,
                 seed=args.seed,
             )
             elapsed = time.time() - start_time
@@ -176,6 +197,25 @@ def main():
             # Save output
             edited_img.save(output_path)
             processed += 1
+
+            # Save comparison plot if requested
+            if args.save_comparisons:
+                comparison_path = os.path.join(comparisons_dir, source_filename.replace('.jpg', '.png'))
+                os.makedirs(os.path.dirname(comparison_path), exist_ok=True)
+
+                fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+
+                axes[0].imshow(source_img)
+                axes[0].set_title("Source Image")
+                axes[0].axis("off")
+
+                axes[1].imshow(edited_img)
+                axes[1].set_title(f"Edited ({args.model.upper()})\n\"{editing_prompt[:60]}...\"" if len(editing_prompt) > 60 else f"Edited ({args.model.upper()})\n\"{editing_prompt}\"")
+                axes[1].axis("off")
+
+                plt.tight_layout()
+                plt.savefig(comparison_path, dpi=150, bbox_inches="tight")
+                plt.close()
 
             # Clear memory periodically
             if processed % 10 == 0:
@@ -210,15 +250,18 @@ def main():
         print(f"    - Source images exist at: {args.source_dir}")
         print(f"    - Mapping file is correct: {args.mapping_file}")
         print(f"    - Selected filters match available images")
-    print(f"\nOutputs saved to: {args.output_dir}")
+    print(f"\nOutputs saved to:")
+    print(f"  - Edited images: {edited_dir}")
+    if args.save_comparisons:
+        print(f"  - Comparisons: {comparisons_dir}")
     print(f"{'='*60}")
 
     # Clean up
     editor.clear_memory()
 
     print("\nDone! Next steps:")
-    print(f"  1. Review outputs: ls {args.output_dir}")
-    print(f"  2. Run evaluation: python evaluate.py --outputs_dir {args.output_dir}")
+    print(f"  1. Review outputs: ls {edited_dir}")
+    print(f"  2. Run evaluation: python evaluate.py --outputs_dir {edited_dir}")
 
 
 if __name__ == "__main__":

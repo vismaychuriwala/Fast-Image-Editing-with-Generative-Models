@@ -41,8 +41,11 @@ def main():
         print(f"Error: Image not found at {args.image}")
         return
 
-    # Create output directory
-    os.makedirs(args.output_dir, exist_ok=True)
+    # Create output directories with organized structure
+    edited_dir = os.path.join(args.output_dir, "single", "edited")
+    comparisons_dir = os.path.join(args.output_dir, "single", "comparisons")
+    os.makedirs(edited_dir, exist_ok=True)
+    os.makedirs(comparisons_dir, exist_ok=True)
 
     # Load image
     print(f"\n[1/4] Loading image from {args.image}")
@@ -83,9 +86,9 @@ def main():
     mem = editor.get_memory_usage()
     print(f"      GPU Memory: {mem['allocated_gb']:.2f}GB allocated, {mem['reserved_gb']:.2f}GB reserved")
 
-    # Save output
+    # Save output to organized folder
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = os.path.join(args.output_dir, f"edited_{timestamp}.jpg")
+    output_path = os.path.join(edited_dir, f"edited_{timestamp}.jpg")
     edited_img.save(output_path)
     print(f"\n      Saved edited image to: {output_path}")
 
@@ -103,10 +106,12 @@ def main():
         print(f"\n      Metrics:")
         print(f"        SSIM (structure preservation):  {metrics['ssim']:.4f}")
         print(f"        LPIPS (perceptual distance):    {metrics['lpips']:.4f}")
+        print(f"        PSNR (signal quality):          {metrics['psnr']:.2f} dB")
+        print(f"        MSE (pixel difference):         {metrics['mse']:.6f}")
         print(f"        CLIP Score (text alignment):    {metrics['clip_score']:.2f}")
 
-        # Save metrics
-        metrics_path = os.path.join(args.output_dir, f"metrics_{timestamp}.txt")
+        # Save metrics to edited folder
+        metrics_path = os.path.join(edited_dir, f"metrics_{timestamp}.txt")
         with open(metrics_path, "w") as f:
             f.write(f"Image: {args.image}\n")
             f.write(f"Prompt: {args.prompt}\n")
@@ -115,6 +120,8 @@ def main():
             f.write(f"\nMetrics:\n")
             f.write(f"  SSIM:       {metrics['ssim']:.4f}\n")
             f.write(f"  LPIPS:      {metrics['lpips']:.4f}\n")
+            f.write(f"  PSNR:       {metrics['psnr']:.2f} dB\n")
+            f.write(f"  MSE:        {metrics['mse']:.6f}\n")
             f.write(f"  CLIP Score: {metrics['clip_score']:.2f}\n")
         print(f"      Saved metrics to: {metrics_path}")
 
@@ -131,7 +138,7 @@ def main():
         axes[1].axis("off")
 
         plt.tight_layout()
-        plot_path = os.path.join(args.output_dir, f"comparison_{timestamp}.png")
+        plot_path = os.path.join(comparisons_dir, f"comparison_{timestamp}.png")
         plt.savefig(plot_path, dpi=150, bbox_inches="tight")
         print(f"      Saved comparison plot to: {plot_path}")
         plt.close()
@@ -150,7 +157,7 @@ def main():
         axes[1].axis("off")
 
         plt.tight_layout()
-        plot_path = os.path.join(args.output_dir, f"comparison_{timestamp}.png")
+        plot_path = os.path.join(comparisons_dir, f"comparison_{timestamp}.png")
         plt.savefig(plot_path, dpi=150, bbox_inches="tight")
         print(f"      Saved comparison plot to: {plot_path}")
         plt.close()

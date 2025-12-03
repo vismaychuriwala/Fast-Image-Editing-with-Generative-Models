@@ -30,7 +30,7 @@ class FastEditor:
     MODEL_CONFIGS = {
         "sdxl": {
             "base_model": "stabilityai/stable-diffusion-xl-base-1.0",
-            "controlnet": "diffusers/controlnet-canny-sdxl-1.0",
+
             "lcm_lora": "latent-consistency/lcm-lora-sdxl",
             "vae_fix": "madebyollin/sdxl-vae-fp16-fix", # Fix for fp16 color artifacts
             "use_full_lcm": False,  # Use LoRA adapter
@@ -38,7 +38,6 @@ class FastEditor:
         },
         "ssd-1b": {
             "base_model": "segmind/SSD-1B",
-            "controlnet": "diffusers/controlnet-canny-sdxl-1.0",
             "lcm_model": "latent-consistency/lcm-ssd-1b",
             "vae_fix": "madebyollin/sdxl-vae-fp16-fix", # <--- ADD THIS
             "use_full_lcm": True,
@@ -75,18 +74,15 @@ class FastEditor:
         # 1. Load ControlNet (Canny) for structure preservation
         print("[FastEditor] Loading ControlNet (Canny)...")
         self.controlnet = ControlNetModel.from_pretrained(
-            self.config["controlnet"],
-            torch_dtype=dtype
+            "diffusers/controlnet-canny-sdxl-1.0-small", # VRAM Saver
+            torch_dtype=torch.float16
         )
         # Load VAE fix if specified (Corrected logic to apply to BOTH paths)
-        vae = None
-        if "vae_fix" in self.config:
-            print(f"[FastEditor] Loading VAE fix: {self.config['vae_fix']}...")
-            vae = AutoencoderKL.from_pretrained(
-                self.config["vae_fix"],
-                torch_dtype=dtype,
-                force_upcast=True
-            )
+        vae = AutoencoderKL.from_pretrained(
+            "madebyollin/sdxl-vae-fp16-fix",
+            torch_dtype=dtype,
+            force_upcast=True
+        )
 
         # 2. Load base model with appropriate LCM configuration
         if self.config["use_full_lcm"]:
@@ -111,7 +107,7 @@ class FastEditor:
             print("[FastEditor] Setting LCM scheduler (Manual Config)...")
             self.pipe.scheduler = LCMScheduler.from_config(
                 self.pipe.scheduler.config,
-                timestep_spacing="trailing"  # <--- CRITICAL for SSD-1B LCM
+                timestep_spacing="trailing"
             )
         else:
             # === SDXL PATH ===
@@ -143,7 +139,8 @@ class FastEditor:
         else:
             print("[FastEditor]   - CPU offload disabled (faster, needs more VRAM)")
 
-        self.pipe.enable_vae_slicing()        # Process VAE in slices
+        # self.pipe.enable_vae_slicing()        # Process VAE in slices
+        self.pipe.enable_vae_tiling()           # Process VAE in tiles
         self.pipe.enable_attention_slicing()  # Reduce attention memory
 
         print("[FastEditor] Initialization complete!")
@@ -183,7 +180,7 @@ class FastEditor:
         prompt,
         negative_prompt="",
         num_inference_steps=4,
-        guidance_scale=1.5,
+        guidance_scale=1.2,
         controlnet_conditioning_scale=0.5,
         canny_low_threshold=100,
         canny_high_threshold=200,
@@ -213,7 +210,7 @@ class FastEditor:
             generator = None
 
         # Resize to 512x512 (PIE-Bench resolution)
-        image = image.resize((512, 512), Image.LANCZOS)
+        image = image.resize((1024, 1024), Image.LANCZOS)
 
         # Generate Canny edge map
         control_image = self.preprocess_image(

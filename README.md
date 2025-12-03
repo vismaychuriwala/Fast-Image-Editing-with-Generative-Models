@@ -17,9 +17,16 @@ project/
 │   └── metrics.py        # Metrics calculator
 ├── data/
 │   └── PIE-Bench_v1/     # Dataset
-├── outputs/              # Generated images
+├── outputs/              # Generated images (organized structure)
+│   ├── single/           # Single image outputs
+│   │   ├── edited/       # Edited images
+│   │   └── comparisons/  # Comparison plots
+│   └── batch/            # Batch processing outputs
+│       ├── edited/       # Edited images
+│       └── comparisons/  # Comparison plots
 ├── results/              # Evaluation results
 ├── run_single_image.py   # Single image editing
+├── run_batch.py          # Batch processing
 ├── evaluate.py           # Batch evaluation
 ├── requirements.txt
 └── README.md
@@ -92,6 +99,7 @@ python run_batch.py \
     --steps 4 \
     --guidance 1.5 \
     --control_scale 0.5 \
+    --save_comparisons \
     --skip_existing
 ```
 
@@ -106,9 +114,18 @@ python run_batch.py \
 - `--steps`: Number of inference steps (default: 4)
 - `--guidance`: Guidance scale (default: 1.5)
 - `--control_scale`: ControlNet conditioning scale (default: 0.5)
+- `--canny_low`: Canny edge detection low threshold (default: 100)
+- `--canny_high`: Canny edge detection high threshold (default: 200)
 - `--seed`: Random seed for reproducibility
+- `--negative_prompt`: Negative prompt (optional)
+- `--save_comparisons`: Save side-by-side comparison images (adds overhead)
 - `--skip_existing`: Skip images that already have outputs (useful for resuming)
 - `--no_cpu_offload`: Disable CPU offloading (faster but needs more VRAM)
+
+**Output Structure:**
+Batch outputs are organized into:
+- `outputs/batch/edited/` - Edited images (mirrors PIE-Bench directory structure)
+- `outputs/batch/comparisons/` - Side-by-side comparison plots (if `--save_comparisons` is used)
 
 **Filter Examples:**
 
@@ -139,16 +156,22 @@ python run_batch.py --num_images 1000 --skip_existing
 Evaluate edited images and compute metrics:
 
 ```bash
+# Evaluate batch outputs
 python evaluate.py \
-    --outputs_dir outputs \
+    --outputs_dir outputs/batch/edited \
     --results_file results/metrics.csv \
     --summary_file results/summary.json
+
+# Or evaluate single image outputs
+python evaluate.py \
+    --outputs_dir outputs/single/edited \
+    --results_file results/single_metrics.csv
 ```
 
 **Arguments:**
 - `--mapping_file`: PIE-Bench mapping file (default: `data/PIE-Bench_v1/mapping_file.json`)
 - `--source_dir`: Source images directory (default: `data/PIE-Bench_v1/annotation_images`)
-- `--outputs_dir`: Directory with edited images
+- `--outputs_dir`: Directory with edited images (e.g., `outputs/batch/edited` or `outputs/single/edited`)
 - `--results_file`: Output CSV for detailed metrics
 - `--summary_file`: Output JSON for summary statistics
 
@@ -156,6 +179,13 @@ python evaluate.py \
 - CSV file with per-image metrics
 - JSON file with aggregate statistics (mean, std, median)
 - Console summary with overall and per-category metrics
+
+**Metrics Computed:**
+- **SSIM** (Structural Similarity Index): Structure preservation (0-1, higher is better)
+- **LPIPS** (Learned Perceptual Image Patch Similarity): Perceptual distance (0-1+, lower is better)
+- **PSNR** (Peak Signal-to-Noise Ratio): Signal quality in dB (higher is better)
+- **MSE** (Mean Squared Error): Pixel-level difference (0-1, lower is better)
+- **CLIP Score**: Text-image alignment (higher is better)
 
 ## Metrics
 
@@ -168,6 +198,16 @@ python evaluate.py \
 - Measures perceptual distance vs source image
 - Range: 0-1+ (lower is better)
 - Good values: 0.1-0.3
+
+### PSNR (Peak Signal-to-Noise Ratio)
+- Measures signal quality in decibels (dB)
+- Range: 0-∞ dB (higher is better)
+- Good values: 20-30 dB
+
+### MSE (Mean Squared Error)
+- Measures pixel-level difference vs source image
+- Range: 0-1 (lower is better)
+- Good values: <0.01
 
 ### CLIP Score
 - Measures text-image alignment
