@@ -181,7 +181,11 @@ class FastEditor:
         # Only enable if you need to save VRAM and can tolerate slight quality loss
         # self.pipe.enable_vae_slicing()        # Process VAE in slices
         # self.pipe.enable_vae_tiling()         # Process VAE in tiles (can cause color banding)
-        self.pipe.enable_attention_slicing()    # Reduce attention memory (safe)
+
+        # Only enable attention slicing if using CPU offload (memory constrained)
+        if self.enable_cpu_offload:
+            self.pipe.enable_attention_slicing()    # Reduce attention memory
+            print("[FastEditor]   - Attention slicing enabled (memory saving)")
 
         print("[FastEditor] Initialization complete!")
 
