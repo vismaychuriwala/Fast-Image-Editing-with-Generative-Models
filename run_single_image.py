@@ -54,9 +54,13 @@ def main():
         print(f"Error: Image not found at {args.image}")
         return
 
+    # Create output directory name based on model and precision
+    precision_str = "fp32" if args.full_precision else "fp16"
+    model_suffix = f"{args.model}_{precision_str}"
+
     # Create output directories with organized structure
-    edited_dir = os.path.join(args.output_dir, "single", "edited")
-    comparisons_dir = os.path.join(args.output_dir, "single", "comparisons")
+    edited_dir = os.path.join(args.output_dir, "single", "edited", model_suffix)
+    comparisons_dir = os.path.join(args.output_dir, "single", "comparisons", model_suffix)
     os.makedirs(edited_dir, exist_ok=True)
     os.makedirs(comparisons_dir, exist_ok=True)
 

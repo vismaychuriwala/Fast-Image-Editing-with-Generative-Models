@@ -31,20 +31,38 @@ def main():
                         default="data/PIE-Bench_v1/annotation_images",
                         help="Directory containing source images")
     parser.add_argument("--outputs_dir", type=str, required=True,
-                        help="Directory containing edited images (e.g., outputs/batch/edited or outputs/single/edited)")
-    parser.add_argument("--results_file", type=str,
-                        default="results/metrics.csv",
-                        help="Output CSV file for metrics")
-    parser.add_argument("--summary_file", type=str,
-                        default="results/summary.json",
-                        help="Output JSON file for summary statistics")
+                        help="Directory containing edited images (e.g., outputs/batch/edited/sdxl_fp32)")
+    parser.add_argument("--results_file", type=str, default=None,
+                        help="Output CSV file for metrics (auto-detected from outputs_dir if not specified)")
+    parser.add_argument("--summary_file", type=str, default=None,
+                        help="Output JSON file for summary statistics (auto-detected from outputs_dir if not specified)")
     parser.add_argument("--device", type=str, default="cuda",
                         help="Device to use for metrics computation")
 
     args = parser.parse_args()
 
+    # Auto-detect model/precision suffix from outputs_dir for organizing results
+    # e.g., outputs/batch/edited/sdxl_fp32 -> sdxl_fp32
+    model_suffix = None
+    if args.outputs_dir.rstrip('/').endswith(('sdxl_fp32', 'sdxl_fp16', 'ssd-1b_fp32', 'ssd-1b_fp16')):
+        model_suffix = os.path.basename(args.outputs_dir.rstrip('/'))
+
+    # Set default results paths based on model_suffix
+    if args.results_file is None:
+        if model_suffix:
+            args.results_file = f"results/{model_suffix}/metrics.csv"
+        else:
+            args.results_file = "results/metrics.csv"
+
+    if args.summary_file is None:
+        if model_suffix:
+            args.summary_file = f"results/{model_suffix}/summary.json"
+        else:
+            args.summary_file = "results/summary.json"
+
     # Create results directory
     os.makedirs(os.path.dirname(args.results_file), exist_ok=True)
+    os.makedirs(os.path.dirname(args.summary_file), exist_ok=True)
 
     # Load mapping file
     print(f"\n[1/3] Loading mapping file from {args.mapping_file}")
