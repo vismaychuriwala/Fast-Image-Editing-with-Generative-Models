@@ -150,13 +150,22 @@ class FastEditor:
             # === SDXL PATH ===
             # We must load the base model here because the code above was skipped
             print(f"[FastEditor] Loading {model_name.upper()} base model...")
-            self.pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
-                self.config["base_model"],
-                controlnet=self.controlnet,
-                vae=vae,  # Pass the global VAE here
-                torch_dtype=dtype,
-                variant="fp16"
-            ).to(device)
+            # Use variant only for fp16, omit for fp32
+            if self.dtype == torch.float16:
+                self.pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
+                    self.config["base_model"],
+                    controlnet=self.controlnet,
+                    vae=vae,
+                    torch_dtype=self.dtype,
+                    variant="fp16"
+                ).to(device)
+            else:
+                self.pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
+                    self.config["base_model"],
+                    controlnet=self.controlnet,
+                    vae=vae,
+                    torch_dtype=self.dtype
+                ).to(device)
 
             # 3. Load LCM-LoRA
             print("[FastEditor] Loading LCM-LoRA weights...")
