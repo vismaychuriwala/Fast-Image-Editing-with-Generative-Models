@@ -62,3 +62,5 @@ dmypy.json
 *.md
 !README.md
 !QUICK_START.md
+
+*.zip
