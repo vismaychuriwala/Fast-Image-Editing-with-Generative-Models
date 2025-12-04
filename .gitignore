@@ -20,6 +20,7 @@ ENV/
 
 # Project outputs
 outputs/*
+new_outputs/*
 # results/*
 
 # Dataset (keep structure but ignore large files)

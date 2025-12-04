@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from PIL import Image
 from diffusers import (
-    StableDiffusionXLControlNetPipeline,
+    StableDiffusionXLControlNetImg2ImgPipeline,
     ControlNetModel,
     LCMScheduler,
     UNet2DConditionModel,
@@ -103,6 +103,8 @@ class FastEditor:
                 "madebyollin/sdxl-vae-fp16-fix",
                 torch_dtype=self.dtype
             )
+        
+        PipelineClass = StableDiffusionXLControlNetImg2ImgPipeline
 
         # 2. Load base model with appropriate LCM configuration
         if self.config["use_full_lcm"]:
@@ -123,23 +125,14 @@ class FastEditor:
 
             print(f"[FastEditor] Loading {model_name.upper()} base model with LCM UNet...")
             # Use variant only for fp16, omit for fp32
-            if self.dtype == torch.float16:
-                self.pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
-                    self.config["base_model"],
-                    unet=unet,
-                    controlnet=self.controlnet,
-                    vae=vae,
-                    torch_dtype=self.dtype,
-                    variant="fp16"
-                ).to(device)
-            else:
-                self.pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
-                    self.config["base_model"],
-                    unet=unet,
-                    controlnet=self.controlnet,
-                    vae=vae,
-                    torch_dtype=self.dtype
-                ).to(device)
+            self.pipe = PipelineClass.from_pretrained(
+                self.config["base_model"],
+                unet=unet, 
+                controlnet=self.controlnet,
+                vae=vae,
+                torch_dtype=self.dtype,
+                variant="fp16" if self.dtype == torch.float16 else None
+            ).to(device)
             
             print("[FastEditor] Setting LCM scheduler (Manual Config)...")
             self.pipe.scheduler = LCMScheduler.from_config(
@@ -149,26 +142,15 @@ class FastEditor:
         else:
             # === SDXL PATH ===
             # We must load the base model here because the code above was skipped
-            print(f"[FastEditor] Loading {model_name.upper()} base model...")
             # Use variant only for fp16, omit for fp32
-            if self.dtype == torch.float16:
-                self.pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
-                    self.config["base_model"],
-                    controlnet=self.controlnet,
-                    vae=vae,
-                    torch_dtype=self.dtype,
-                    variant="fp16"
-                ).to(device)
-            else:
-                self.pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
-                    self.config["base_model"],
-                    controlnet=self.controlnet,
-                    vae=vae,
-                    torch_dtype=self.dtype
-                ).to(device)
-
-            # 3. Load LCM-LoRA
-            print("[FastEditor] Loading LCM-LoRA weights...")
+            print(f"[FastEditor] Loading {model_name.upper()} Img2Img Pipeline...")
+            self.pipe = PipelineClass.from_pretrained(
+                self.config["base_model"],
+                controlnet=self.controlnet,
+                vae=vae,
+                torch_dtype=self.dtype,
+                variant="fp16" if self.dtype == torch.float16 else None
+            ).to(device)
             self.pipe.load_lora_weights(self.config["lcm_lora"])
 
             # 4. Set LCM scheduler (Trailing spacing)
@@ -232,6 +214,7 @@ class FastEditor:
         image,
         prompt,
         negative_prompt="",
+        strength=0.80,
         num_inference_steps=4,
         guidance_scale=1.5,
         controlnet_conditioning_scale=0.5,
@@ -264,11 +247,12 @@ class FastEditor:
 
         # Resize to 1024x1024 (SDXL native resolution)
         # Note: Metrics will be computed at 512x512 (PIE-Bench resolution) downstream
-        image = image.resize((1024, 1024), Image.LANCZOS)
+        # Resize input to 1024x1024 (Required for SDXL/SSD-1B)
+        input_image = image.resize((1024, 1024), Image.LANCZOS)
 
-        # Generate Canny edge map
+        # Generate Control Image (Canny Edges)
         control_image = self.preprocess_image(
-            image,
+            input_image,
             low_threshold=canny_low_threshold,
             high_threshold=canny_high_threshold
         )
@@ -277,7 +261,10 @@ class FastEditor:
         result = self.pipe(
             prompt=prompt,
             negative_prompt=negative_prompt,
-            image=control_image,
+            # CRITICAL FIX: Pass both the original image AND the edges
+            image=input_image,           # Source for color/latents
+            control_image=control_image, # Source for structure
+            strength=strength,
             num_inference_steps=num_inference_steps,
             guidance_scale=guidance_scale,
             controlnet_conditioning_scale=controlnet_conditioning_scale,
