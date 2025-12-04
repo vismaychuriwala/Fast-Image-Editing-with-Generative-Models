@@ -188,7 +188,7 @@ class FastEditor:
 
         # Note: VAE tiling/slicing can cause color artifacts with fp16
         # Only enable if you need to save VRAM and can tolerate slight quality loss
-        # self.pipe.enable_vae_slicing()        # Process VAE in slices
+        self.pipe.enable_vae_slicing()        # Process VAE in slices
         # self.pipe.enable_vae_tiling()         # Process VAE in tiles (can cause color banding)
 
         # Only enable attention slicing if using CPU offload (memory constrained)
