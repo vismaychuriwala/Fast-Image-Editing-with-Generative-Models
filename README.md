@@ -190,7 +190,7 @@ LCM models are specifically optimized for 4 steps with low guidance scale (CFG=1
 
 ## Benchmark Methodology
 
-All quality metrics come from **700 PIE-Bench v1 images** processed on a Google Colab A100 (80GB VRAM) with CPU offloading disabled. Four configurations were tested: SDXL and SSD-1B, each in FP32 and FP16, all using 4-step LCM inference with ControlNet-guided img2img (CFG=1.5, strength=0.5, ControlNet scale=0.5). See [`run_benchmark_colab.ipynb`](run_benchmark_colab.ipynb) for the complete benchmark pipeline.
+All quality metrics come from **700 PIE-Bench v1 images** processed on a Google Colab A100 (80GB VRAM) with CPU offloading disabled. Four configurations were tested: SDXL and SSD-1B, each in FP32 and FP16, all using 4-step LCM inference with ControlNet-guided img2img (CFG=1.5, strength=0.5, ControlNet scale=0.5). See [`run_benchmark_colab.ipynb`](run_benchmark_colab.ipynb) for the complete benchmark pipeline. Full outputs and results are available at [Benchmark-Results](https://drive.google.com/drive/folders/1pH7OeOgON-G1yqzvCgvAKYoyR65F5vvV?usp=sharing).
 
 **Resolution Handling**: PIE-Bench images are 512×512, but SDXL/SSD-1B require 1024×1024 input. Images were upscaled to 1024×1024 for inference, then downscaled back to 512×512 for metric calculation to remain consistent with PIE-Bench baseline measurements.
 
