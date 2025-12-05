@@ -96,7 +96,7 @@ The choice of **SSD-1B** over SDXL was driven by memory constraints—at 50% sma
 Both SDXL and SSD-1B operate at **1024×1024 resolution**, a significant quality improvement over SD 1.5's 512×512. This higher resolution enables more detailed edits and better preservation of fine structures in the source image.
 
 ![SSD-1B vs SDXL](figures/comparison_sdxl_fp16_vs_ssd-1b_fp16_000000000086.png)
-*SDXL FP16 preserves slightly finer details, but SSD-1B FP16 achieves comparable semantic accuracy 33% faster*
+*SDXL FP16 achieves more natural looking results, but SSD-1B FP16 achieves comparable semantic accuracy 33% faster*
 
 ---
 
@@ -303,6 +303,8 @@ In some cases, SDXL follows instructions more closely and produces more consiste
 
 **Structure preservation trade-off**: ControlNet guides generation via edges, which preserves layout well but may limit drastic semantic changes (e.g., replacing a dog with a car).
 
+**Strength parameter sensitivity**: The `strength` parameter (currently 0.5) critically affects edit quality. Too low and the model makes minimal changes (ignoring prompts), too high and structure preservation degrades. Finding the optimal value requires per-image tuning, which undermines the pipeline's speed advantage.
+
 **Quality ceiling**: Four-step LCM inference is optimized for speed, not maximum fidelity. Complex scenes with fine details may benefit from more steps, at the cost of proportionally slower inference.
 
 **Edge detection sensitivity**: Canny edge extraction struggles with very cluttered or low-contrast images, producing poor guidance maps.
@@ -313,12 +315,27 @@ In some cases, SDXL follows instructions more closely and produces more consiste
 
 ## Future Directions
 
-- Benchmark on additional consumer GPUs (RTX 4060, 4070, etc.)
-- Per-editing-type performance breakdown (object replacement vs attribute change)
-- Comparison with other fast editing methods (InstructPix2Pix, MagicBrush)
-- Img2Img pipeline variant (simpler, potentially less VRAM)
-- SD 1.5 support (faster on limited hardware)
-- Improved color consistency through fine-tuning or alternative schedulers
+### Parameter Optimization
+- **Adaptive strength scheduling**: Automatically adjust `strength` parameter based on edit type or source image characteristics to balance edit application vs structure preservation
+- **Per-layer ControlNet scaling**: Fine-tune ControlNet influence at different UNet layers instead of using a single global scale
+- **Dynamic inference steps**: Increase steps selectively for complex edits while maintaining 4 steps for simple ones
+- **CFG scheduling**: Experiment with classifier-free guidance schedules instead of fixed CFG=1.5
+
+### Model Improvements
+- **Fine-tuning for editing**: Train LoRA adapters specifically for image editing tasks to reduce prompt ignoring and improve color accuracy
+- **Alternative schedulers**: Test LCM-LoRA with different noise schedulers to improve color reproduction and reduce artifacts
+- **Hybrid ControlNet conditions**: Combine Canny edges with other conditions (depth, segmentation) for better semantic control
+
+### Architecture Variants
+- **SD 1.5 support**: Implement 512×512 pipeline for faster inference on constrained hardware (sub-3s per image possible)
+- **SDXL-Turbo integration**: Explore single-step inference with SDXL-Turbo for 10× additional speedup
+- **Quantization (INT8/INT4)**: Apply model quantization for further VRAM reduction and potential speed gains on newer GPUs
+
+### Benchmarking and Analysis
+- **Per-edit-type breakdown**: Analyze which edit categories (object replacement, attribute change, style transfer) work best with current parameters
+- **Comparison with recent methods**: Benchmark against InstructPix2Pix, MagicBrush, and Plug-and-Play diffusion
+- **Consumer GPU testing**: Validate performance on RTX 4060, 4070, and AMD GPUs
+- **Failure mode analysis**: Systematic study of when/why prompt ignoring occurs to inform parameter tuning strategies
 
 ---
 
