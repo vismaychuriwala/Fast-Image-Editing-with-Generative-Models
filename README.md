@@ -2,13 +2,13 @@
 
 **100x faster than DDIM inversion. Runs on consumer GPUs.**
 
-![Hero Image](figures/comparison_all_000000000069.png)
+![Hero Image](figures/comparison_all_000000000037.png)
 
 ---
 
 Traditional diffusion-based image editing methods like DDIM inversion and Prompt-to-Prompt are notoriously slow. On an RTX 3060 laptop GPU, these approaches can take **~10 minutes per image**. Even on datacenter GPUs like the A100, traditional inversion methods remain prohibitively slow for most applications, requiring 50-100 reverse diffusion steps plus expensive null-text optimization.
 
-This project demonstrates that **distilled diffusion models** (SSD-1B) combined with **consistency models** (LCM) can achieve **~6 seconds per image** on the same consumer hardware—a **100x speedup**—while maintaining strong semantic accuracy. The key insight: without massive compute resources to train new models, we can still achieve dramatic performance gains through careful model selection, strategic integration, and precision optimization. For implementation details, see [IMPLEMENTATION.md](IMPLEMENTATION.md).
+This project demonstrates that **distilled diffusion models** (SSD-1B) combined with **consistency models** (LCM) and **ControlNet** guidance can achieve **~6 seconds per image** on the same consumer hardware—a **100x speedup**—while delivering quality metrics remarkably close to the slow baseline. Our approach achieves **87% of DDIM's structural similarity** (SSIM 0.620 vs 0.711) while **surpassing it by 23% on text-image alignment** (CLIP score) and **58% on semantic preservation** (DINO). The pipeline operates at **1024×1024 resolution** (vs SD 1.5's 512×512), enabling more detailed edits and better structure preservation. Critically, this performance fits comfortably on 6GB GPUs, making high-quality image editing accessible for local development and iteration. The key insight: without massive compute resources to train new models, we can still achieve dramatic performance gains through careful model selection, strategic integration, and precision optimization. For implementation details, see [IMPLEMENTATION.md](IMPLEMENTATION.md).
 
 ---
 
@@ -16,12 +16,11 @@ This project demonstrates that **distilled diffusion models** (SSD-1B) combined 
 
 - [Results at a Glance](#results-at-a-glance)
 - [Architecture](#architecture)
-- [Critical Optimizations](#critical-optimizations)
-  - [FP16 Precision is Literally Free](#1-fp16-precision-is-literally-free)
-  - [CPU Offloading: Intelligent, Not Slow](#2-cpu-offloading-intelligent-not-slow)
-  - [Small ControlNet for SSD-1B](#3-small-controlnet-for-ssd-1b)
+- [Performance Optimizations](#performance-optimizations)
+  - [FP16 Precision is Nearly Free](#1-fp16-precision-is-nearly-free)
+  - [CPU Offloading: Intelligent Memory Management](#2-cpu-offloading-intelligent-memory-management)
+  - [Memory Optimizations](#3-memory-optimizations)
   - [Four-Step LCM Inference](#4-four-step-lcm-inference)
-  - [Quality Fixes That Mattered](#5-quality-fixes-that-mattered)
 - [Benchmark Methodology](#benchmark-methodology)
 - [Consumer Hardware Performance](#consumer-hardware-performance)
 - [Limitations](#limitations)
@@ -43,20 +42,20 @@ This project demonstrates that **distilled diffusion models** (SSD-1B) combined 
 
 | Configuration | SSIM ↑ | LPIPS ↓ | CLIP ↑ | PSNR ↑ |
 |--------------|--------|---------|--------|--------|
-| DDIM P2P (Baseline) | 0.711 | 0.209 | 25.01 | 17.87 |
-| **SSD-1B FP16 (Ours)** | 0.436 | 0.458 | **32.07** | 10.33 |
-| SDXL FP16 | 0.464 | 0.406 | 31.90 | 11.29 |
+| DDIM P2P (Baseline) | **0.711** | 0.209 | 25.01 | 17.87 |
+| SSD-1B FP16 | 0.620 | 0.249 | **30.88** | 18.13 |
+| **SDXL FP16 (Ours)** | **0.662** | **0.194** | **30.19** | **20.63** |
 
-The metrics reveal an interesting trade-off: our method sacrifices some structural similarity (SSIM) compared to the slow baseline, but achieves **28% higher CLIP score**, indicating better text-image alignment. For applications where speed matters and perfect pixel-level reconstruction isn't required, this is a favorable trade.
+The metrics reveal a compelling balance: our method achieves **23.5% higher CLIP score** than the slow baseline while maintaining comparable structure preservation (SSIM only 12.8% lower). Better yet, semantic similarity (DINO) is **58% better** than DDIM, indicating superior content understanding despite faster inference.
 
 **Memory Efficiency:**
 
 | Configuration | VRAM (A100) | Notes |
 |--------------|-------------|-------|
-| SDXL FP32 | 26.5 GB | Crashes on RTX 3060 |
-| SDXL FP16 | 14.3 GB | 46% VRAM reduction |
-| SSD-1B FP32 | 10.5 GB | Usable with offloading |
-| **SSD-1B FP16** | **5.3 GB** | **49.5% VRAM reduction, fits on 6GB GPU** |
+| SDXL FP32 | 22.7 GB | Crashes on RTX 3060 |
+| SDXL FP16 | 11.2 GB | 50.7% VRAM reduction |
+| SSD-1B FP32 | 17.3 GB | Usable with offloading |
+| **SSD-1B FP16** | **8.5 GB** | **50.9% VRAM reduction, fits on 6GB GPU** |
 
 ---
 
@@ -73,12 +72,12 @@ graph TB
     end
 
     B --> F[Edge Map]
-    C --> G[Latent Representation<br/>4×64×64]
+    C --> G[Source Latent<br/>4×128×128]
     E --> H[Text Embeddings]
 
-    subgraph "Guided Generation"
+    subgraph "Guided Img2Img Diffusion"
         F --> I[ControlNet<br/>Canny]
-        G --> J[UNet + LCM LoRA<br/>4 steps, CFG=1.5]
+        G --> J[UNet + LCM LoRA<br/>4 steps, CFG=1.5<br/>strength=0.5]
         H --> J
         I -->|Structure Guidance| J
     end
@@ -92,92 +91,106 @@ graph TB
     style L fill:#ffe1f5
 ```
 
-The choice of **SSD-1B** over SDXL was driven by memory constraints—at 50% smaller (1.8B vs 3.5B parameters), it fits comfortably on consumer GPUs. **LCM** (Latent Consistency Models) replaces the 50-step DDIM process with just 4 steps, providing a 12× inference speedup with minimal quality loss. **ControlNet** extracts Canny edges from the source image to guide generation, preventing catastrophic changes while allowing semantic edits.
+The choice of **SSD-1B** over SDXL was driven by memory constraints—at 50% smaller (1.8B vs 3.5B parameters), it fits comfortably on consumer GPUs. **LCM** (Latent Consistency Models) reduces the traditional 50-step DDIM process to just 4 steps with minimal quality loss. **ControlNet** extracts Canny edges from the source image to guide the img2img diffusion process, preserving structural layout while enabling semantic edits.
 
 Both SDXL and SSD-1B operate at **1024×1024 resolution**, a significant quality improvement over SD 1.5's 512×512. This higher resolution enables more detailed edits and better preservation of fine structures in the source image.
 
-![SSD-1B vs SDXL](figures/comparison_sdxl_fp16_vs_ssd-1b_fp16_000000000061.png)
+![SSD-1B vs SDXL](figures/comparison_sdxl_fp16_vs_ssd-1b_fp16_000000000086.png)
 *SDXL FP16 preserves slightly finer details, but SSD-1B FP16 achieves comparable semantic accuracy 33% faster*
 
 ---
 
-## Critical Optimizations
+## Performance Optimizations
 
 Getting this pipeline to run on a 6GB RTX 3060 required addressing multiple bottlenecks ([see full hardware specs](#system-configuration)). Here's what made the difference:
 
-### 1. FP16 Precision is Literally Free
+### 1. FP16 Precision is Nearly Free
 
 Using FP16 (`torch.float16`) cuts memory usage in half compared to FP32, with zero perceptual quality loss when paired with the `madebyollin/sdxl-vae-fp16-fix` VAE. This specialized VAE prevents the NaN issues and color artifacts that typically plague FP16 inference.
 
-![SDXL FP16 vs FP32](figures/comparison_sdxl_fp16_vs_sdxl_fp32_000000000001.png)
-*SDXL FP16 vs FP32: visually identical outputs, 46% VRAM savings*
+![SDXL FP16 vs FP32](figures/comparison_sdxl_fp16_vs_sdxl_fp32_000000000000.png)
+*SDXL FP16 vs FP32: visually identical outputs, 50.7% VRAM savings*
 
 The numbers back this up:
-- **SSIM difference**: 0.00% (identical structure preservation)
-- **LPIPS difference**: 0.25% (negligible perceptual change)
-- **VRAM savings**: 49.5% for SSD-1B, 46.0% for SDXL
+- **SSIM difference**: 0.16% (identical structure preservation)
+- **LPIPS difference**: 0.40% (negligible perceptual change)
+- **VRAM savings**: 50.9% for SSD-1B, 50.7% for SDXL
 
-An early mistake was using `force_upcast=True` on the VAE, which defeated the purpose of the fp16-fix and caused green/purple color tints. Removing this flag and trusting the fp16-fix VAE resolved the issue entirely.
-
-![SSD-1B FP16 vs FP32](figures/comparison_ssd-1b_fp16_vs_ssd-1b_fp32_000000000050.png)
+![SSD-1B FP16 vs FP32](figures/comparison_all_000000000035.png)
 *Even with the distilled model, FP16 maintains quality while offering significant speed/memory benefits*
 
-### 2. CPU Offloading: Intelligent, Not Slow
+### 2. CPU Offloading: Intelligent Memory Management
 
-Conventional wisdom suggests CPU offloading is "just slower." The reality is more nuanced. On GPUs with limited VRAM, **CPU offloading is intelligent memory management** that prevents a catastrophic failure mode: DRAM paging.
+On GPUs with limited VRAM, CPU offloading prevents catastrophic DRAM paging by strategically moving inactive components to system RAM.
 
 **RTX 3060 Performance (SSD-1B FP16):**
 - With CPU offload enabled: **~6s per image**
 - With CPU offload disabled: **~25s per image**
 
-That's a **4.2× slowdown** when you'd expect offloading to hurt performance. What's happening? Without offloading, the model (5.3GB) fits barely within 6GB VRAM, but memory fragmentation and temporary allocations push it over the edge. The system falls back to DRAM paging, swapping model weights between GPU and system memory on every operation—a severe performance hit.
+Despite expectations that offloading would slow performance, enabling it results in **4.2× faster execution**. Without offloading, the full model (8.5GB base) attempts to fit into 6GB VRAM. Memory fragmentation and temporary allocations push the system beyond capacity, triggering DRAM paging where model weights swap between GPU and system memory on every operation.
 
 ```mermaid
-graph LR
+graph TB
     subgraph "With CPU Offload (6s)"
-        A1[GPU 6GB] -->|Active UNet| A2[~4.5GB Used]
-        A3[CPU RAM] -->|Text Encoder, VAE| A4[~5GB]
-        A2 -.->|Swap Components| A4
+        A1["GPU (6GB)"]
+        A2["UNet<br/>~4.5GB"]
+        A3["ControlNet<br/>~0.5GB"]
+        A4["CPU RAM"]
+        A5["Text Encoder<br/>~2GB"]
+        A6["VAE<br/>~2GB"]
+
+        A1 --> A2
+        A1 --> A3
+        A4 --> A5
+        A4 --> A6
     end
 
     subgraph "Without Offload (25s)"
-        B1[GPU 6GB] -->|All Models| B2[~5.3GB + Overhead]
-        B2 -->|Memory Overflow| B3[DRAM Paging]
-        B3 -->|4.2x Slower| B4[Severe Slowdown]
+        B1["GPU (6GB)"]
+        B2["UNet<br/>~4.5GB"]
+        B3["ControlNet<br/>~0.5GB"]
+        B4["Text Encoder<br/>~2GB"]
+        B5["VAE<br/>~2GB"]
+        B6["Memory Overflow<br/>DRAM Paging"]
+
+        B1 --> B2
+        B1 --> B3
+        B1 -.->|Overflow| B4
+        B1 -.->|Overflow| B5
+        B4 --> B6
+        B5 --> B6
     end
 
-    style A2 fill:#90EE90
-    style B3 fill:#FFB6C6
-    style B4 fill:#FF6B6B
+    style A2 fill:#4a9eff
+    style A3 fill:#4a9eff
+    style A5 fill:#90ee90
+    style A6 fill:#90ee90
+    style B2 fill:#4a9eff
+    style B3 fill:#4a9eff
+    style B6 fill:#ff6b6b
 ```
 
-CPU offloading intelligently manages which components stay GPU-resident (the active UNet layers during inference) versus which can safely live in RAM (inactive text encoders, VAE). This keeps the working set small enough to avoid paging, resulting in 4× faster execution than the naive "no offload" approach.
+CPU offloading manages which components stay GPU-resident (active UNet layers during inference) versus which live in RAM (inactive text encoders, VAE). This keeps the working set small enough to avoid paging, resulting in 4× faster execution.
 
-When models exceed VRAM capacity entirely (e.g., SDXL FP32 on 6GB), offloading becomes essential—or the system crashes. On high-VRAM GPUs like the A100 (80GB), offloading is unnecessary and adds a 20-30% overhead, so we disable it for benchmark runs.
+When models exceed VRAM capacity entirely (e.g., SDXL FP32 on 6GB), offloading becomes essential to prevent crashes. On high-VRAM GPUs like the A100 (80GB), offloading is unnecessary and adds a 20-30% overhead, so we disable it for benchmark runs.
 
-### 3. Small ControlNet for SSD-1B
+### 3. Memory Optimizations
 
-Using the `controlnet-canny-sdxl-1.0-small` variant instead of the full ControlNet saves ~2GB VRAM with minimal quality impact. For SDXL benchmarks, we used the full ControlNet to maximize quality; for SSD-1B, the small variant was sufficient and enabled faster iteration during development.
+Additional VRAM optimizations enable the pipeline to run on consumer hardware:
+
+- **Small ControlNet**: Using `controlnet-canny-sdxl-1.0-small` instead of the full ControlNet saves ~2GB VRAM with minimal quality impact
+- **Attention slicing**: Enabled when CPU offloading is active to reduce memory during attention computation
+- **VAE optimizations**: Removed VAE tiling (caused color artifacts at tile boundaries) and rely on the fp16-fix VAE for memory efficiency
 
 ### 4. Four-Step LCM Inference
 
-LCM models are specifically optimized for 4 steps with low guidance scale (CFG=1.5). More steps provide diminishing returns and increase latency. This single change—DDIM's 50 steps to LCM's 4—accounts for most of the 12× speedup.
-
-### 5. Quality Fixes That Mattered
-
-- **Removed VAE tiling**: Caused color artifacts at tile boundaries; unnecessary with attention slicing
-- **Disabled `force_upcast`**: Prevented the fp16-fix VAE from working correctly
-- **Attention slicing**: Enabled only when CPU offloading is active (memory-constrained scenarios)
-
-### 6. Resolution: 1024×1024 is Non-Negotiable
-
-SDXL and SSD-1B are trained specifically for 1024×1024 resolution. An attempt to run at 512×512 for faster inference resulted in severely degraded "deepfried" outputs with poor quality. The models don't gracefully downscale—they require their native resolution to function properly. While this increases computation compared to SD 1.5 (512×512), the quality improvement and LCM speedup more than compensate for the extra pixels.
+LCM models are specifically optimized for 4 steps with low guidance scale (CFG=1.5). More steps provide diminishing returns and increase latency.
 
 ---
 
 ## Benchmark Methodology
 
-All quality metrics come from **700 PIE-Bench v1 images** processed on a Google Colab A100 (80GB VRAM) with CPU offloading disabled. Four configurations were tested: SDXL and SSD-1B, each in FP32 and FP16, all using 4-step LCM inference with ControlNet guidance (CFG=1.5, ControlNet scale=0.5).
+All quality metrics come from **700 PIE-Bench v1 images** processed on a Google Colab A100 (80GB VRAM) with CPU offloading disabled. Four configurations were tested: SDXL and SSD-1B, each in FP32 and FP16, all using 4-step LCM inference with ControlNet-guided img2img (CFG=1.5, strength=0.5, ControlNet scale=0.5). See [`run_benchmark_colab.ipynb`](run_benchmark_colab.ipynb) for the complete benchmark pipeline.
 
 **Resolution Handling**: PIE-Bench images are 512×512, but SDXL/SSD-1B require 1024×1024 input. Images were upscaled to 1024×1024 for inference, then downscaled back to 512×512 for metric calculation to remain consistent with PIE-Bench baseline measurements.
 
@@ -190,28 +203,26 @@ PIE-Bench is a text-guided image editing benchmark covering diverse edit types: 
 - **MSE**: Mean squared error (0-1, lower better)
 - **DINO**: Semantic similarity via self-supervised ViT (0-1, lower better)
 
-The DDIM Prompt-to-Prompt baseline was measured on the same hardware with 50 inference steps, standard CFG=7.5, and null-text optimization. **Note**: The 600s baseline timing was measured with 10 DDIM steps on the RTX 3060 (50 steps would take significantly longer); this represents a practical lower bound for traditional inversion methods.
+The DDIM Prompt-to-Prompt baseline was measured on the same hardware (A100) with 50 inference steps, FP16 precision, standard CFG=7.5, and null-text optimization. **Note**: The 600s baseline timing was measured with 10 DDIM steps and FP16 on the RTX 3060 (50 steps would take significantly longer); this represents a practical lower bound for traditional inversion methods.
 
 ### Full Results (700 images × 4 configurations = 2,800 total edits)
 
 | Configuration | SSIM ↑ | LPIPS ↓ | CLIP ↑ | PSNR ↑ | MSE ↓ | DINO ↓ |
 |--------------|--------|---------|--------|--------|-------|--------|
-| DDIM P2P (Baseline) | 0.711 | 0.209 | 25.01 | 17.87 | 0.022 | 0.069 |
-| SDXL FP32 | 0.464 | 0.405 | 31.90 | 11.29 | 0.085 | 0.043 |
-| SDXL FP16 | 0.464 | 0.406 | 31.90 | 11.29 | 0.085 | 0.043 |
-| SSD-1B FP32 | 0.436 | 0.458 | 32.10 | 10.35 | 0.111 | 0.052 |
-| **SSD-1B FP16** | **0.436** | **0.458** | **32.07** | **10.33** | **0.111** | **0.052** |
+| DDIM P2P (Baseline) | **0.711** | 0.209 | 25.01 | 17.87 | 0.022 | 0.069 |
+| SDXL FP32 | 0.663 | 0.195 | 30.20 | **20.66** | **0.010** | **0.024** |
+| SDXL FP16 | 0.662 | **0.194** | 30.19 | 20.63 | **0.010** | **0.024** |
+| SSD-1B FP32 | 0.621 | 0.250 | **30.88** | 18.13 | 0.017 | 0.029 |
+| SSD-1B FP16 | 0.620 | 0.249 | **30.88** | 18.13 | 0.017 | 0.029 |
 
-Speed context: DDIM baseline takes ~600s/image on RTX 3060; our methods run 6-118s depending on config (5-100× faster). A100 benchmarks focus on quality, not speed, since ample VRAM eliminates offloading overhead.
-
-![All Methods](figures/comparison_all_000000000037.png)
+![All Methods](figures/comparison_all_000000000126.png)
 *All four configurations successfully edit while preserving composition*
 
-FP16 produces **identical quality** to FP32 for both models. SDXL edges out SSD-1B on structure (SSIM: 0.464 vs 0.436, +6.4%) and perceptual quality (LPIPS: 0.405 vs 0.458, -11.6%), but SSD-1B wins slightly on CLIP score (32.07 vs 31.90, +0.5%) and is 33% faster on RTX 3060.
+FP16 produces **identical quality** to FP32 for both models. SDXL edges out SSD-1B on structure (SSIM: 0.662 vs 0.620, +6.8%) and perceptual quality (LPIPS: 0.194 vs 0.249, -28.4%), but SSD-1B wins slightly on CLIP score (30.88 vs 30.19, +2.3%) and is 33% faster on RTX 3060.
 
-Interestingly, all fast methods achieve **higher CLIP scores** than the DDIM baseline (32.07 vs 25.01, +28%), despite lower SSIM. This reflects a fundamental difference: the baseline prioritizes pixel-level reconstruction, while our methods optimize for text alignment. DINO distance is also 25-38% lower for our methods, indicating better semantic preservation.
+Interestingly, all fast methods achieve **higher CLIP scores** than the DDIM baseline (30.88 vs 25.01, +23.5%), despite lower SSIM. This reflects a fundamental difference: the baseline prioritizes pixel-level reconstruction, while our methods optimize for text alignment. DINO distance is also 58-65% lower for our methods, indicating better semantic preservation.
 
-![SDXL Comparison](figures/comparison_sdxl_fp16_vs_ssd-1b_fp16_000000000100.png)
+![SDXL Comparison](figures/comparison_all_000000000135.png)
 *Complex scene: both models handle semantic changes reliably*
 
 The visual differences between FP16 and FP32 are imperceptible, validating the use of fp16-fix VAE. SDXL produces marginally sharper textures, but for interactive applications, SSD-1B's speed advantage outweighs the quality delta.
@@ -220,15 +231,16 @@ The visual differences between FP16 and FP32 are imperceptible, validating the u
 
 ## Consumer Hardware Performance
 
-All timing measurements below are from an **RTX 3060 Laptop GPU (6GB VRAM)** with CPU offloading enabled where necessary ([see full specs](#system-configuration)):
+All timing measurements below are from an **RTX 3060 Laptop GPU (6GB VRAM)** with CPU offloading enabled where necessary ([see full specs](#system-configuration)). A100 benchmarks focus on quality, not speed, since ample VRAM eliminates offloading overhead.
 
-| Configuration | Time/Image | CPU Offload | Notes |
-|--------------|------------|-------------|-------|
-| **SSD-1B FP16** | **~6s** | Enabled | **Recommended: 100× faster than DDIM** |
-| SSD-1B FP16 (no offload) | ~25s | Disabled | DRAM paging catastrophe |
-| SSD-1B FP32 | ~118s | Enabled | Slower but usable |
-| SDXL FP16 | ~113s | Enabled | Comparable to SSD-1B FP32 |
-| SDXL FP32 | CRASH | N/A | Exceeds 6GB even with offload |
+| Configuration | Time/Image | CPU Offload | Speedup vs DDIM | Notes |
+|--------------|------------|-------------|-----------------|-------|
+| DDIM P2P (Baseline) | ~600s (10 min) | N/A | 1× | 10 steps, FP16 |
+| **SSD-1B FP16** | **~6s** | Enabled | **100×** | **Recommended** |
+| SSD-1B FP16 (no offload) | ~25s | Disabled | 24× | DRAM paging catastrophe |
+| SSD-1B FP32 | ~118s | Enabled | 5× | Slower but usable |
+| SDXL FP16 | ~113s | Enabled | 5.3× | Comparable to SSD-1B FP32 |
+| SDXL FP32 | CRASH | N/A | N/A | Exceeds 6GB even with offload |
 
 Only SSD-1B FP16 achieves real-time performance. The "no offload" configuration is particularly instructive: even though the model theoretically fits in 6GB, fragmentation causes DRAM paging, resulting in 4.2× slowdown. This underscores the importance of **GPU residency**—keeping the working set firmly within VRAM is more important than minimizing total model size.
 
@@ -238,39 +250,60 @@ Only SSD-1B FP16 achieves real-time performance. The "no offload" configuration 
 
 While the pipeline achieves strong performance on most edits, certain failure modes persist:
 
+### Prompt Ignoring and Minimal Changes
+
+The most severe limitation is that the models often ignore edit prompts and make minimal or no changes to the source image. This is particularly problematic for SSD-1B:
+
+![Prompt Ignore 1](figures/comparison_all_000000000021.png)
+*Example 1: Models fail to apply the requested edit*
+
+![Prompt Ignore 2](figures/comparison_all_000000000083.png)
+*Example 2: Minimal changes despite clear prompt instructions*
+
+![Prompt Ignore 3](figures/comparison_all_000000000125.png)
+*Example 3: Output nearly identical to source, ignoring the edit request*
+
 ### Color Handling Issues
 
-The 4-step LCM inference sometimes struggles with precise color reproduction, particularly for unusual color combinations or specific color requests. This manifests as unexpected color shifts (pink/green tints) or incorrect color application:
+The 4-step LCM inference sometimes struggles with precise color reproduction, particularly for unusual color combinations or specific color requests. This issue is worse for SSD-1B:
 
 ![Color Issues 1](figures/comparison_all_000000000101.png)
 *Example 1: Unintended color shifts in generated outputs*
 
 ![Color Issues 2](figures/comparison_all_000000000116.png)
-*Example 2: Difficulty maintaining accurate color reproduction*
+*Example 2: Pink and green color shifts*
 
 ![Color Issues 3](figures/comparison_all_111000000001.png)
-*Example 3: Pink and green color artifacts*
+*Example 3: Pink artifacts*
 
 ### Object Consistency and Distortions
 
 The combination of ControlNet edge guidance and few-step diffusion can lead to object morphing or inconsistent details, especially in complex scenes:
 
-![Distortion 1](figures/comparison_all_221000000001.png)
-*Example 1: Object consistency issues with structural elements*
+![Distortion 1](figures/comparison_all_000000000114.png)
+*Example 1: Model changes people's faces and adds colors incorrectly*
 
-![Distortion 2](figures/comparison_all_322000000003.png)
-*Example 2: Morphing and distortion in complex scenes*
+![Distortion 2](figures/comparison_all_221000000001.png)
+*Example 2: Object morphing in complex scenes*
 
 ![Distortion 3](figures/comparison_all_422000000003.png)
-*Example 3: Structural distortions when editing detailed objects*
+*Example 3: Model follows prompt but changes identity/appearance incorrectly*
+
+### SDXL Quality Advantage
+
+In some cases, SDXL follows instructions more closely and produces more consistent results compared to SSD-1B:
+
+![SDXL Better 1](figures/comparison_all_322000000003.png)
+*Example 1: SDXL follows prompt more accurately*
+
+![SDXL Better 2](figures/comparison_all_422000000004.png)
+*Example 2: SDXL maintains better consistency with the edit instruction*
 
 ### Other Known Limitations
 
 **Structure preservation trade-off**: ControlNet guides generation via edges, which preserves layout well but may limit drastic semantic changes (e.g., replacing a dog with a car).
 
 **Quality ceiling**: Four-step LCM inference is optimized for speed, not maximum fidelity. Complex scenes with fine details may benefit from more steps, at the cost of proportionally slower inference.
-
-**Resolution requirement**: SDXL and SSD-1B require 1024×1024 input resolution and don't support lower resolutions without severe quality degradation. This increases computational cost compared to SD 1.5 (512×512) but is necessary for the models to function properly.
 
 **Edge detection sensitivity**: Canny edge extraction struggles with very cluttered or low-contrast images, producing poor guidance maps.
 
